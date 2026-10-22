@@ -1,0 +1,20 @@
+# === エージェントのローカル設定(PC ごとの判断なので載せない) ===
+.claude/settings.local.json
+.codex/
+
+# === ビルド成果物(pico-fido をクローン/ビルドする場合) ===
+build/
+.pio/
+backups/
+vendor/
+.venv/
+__pycache__/
+*.uf2
+*.bin
+
+# === macOS ===
+.DS_Store
+
+# 内部メモ（公開しない）
+CLAUDE.md
+AGENTS.md

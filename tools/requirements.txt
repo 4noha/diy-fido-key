@@ -1,0 +1,5 @@
+west==1.5.0
+bleak==3.0.2
+cbor2==6.1.5
+cryptography==50.0.2
+pyserial==3.5

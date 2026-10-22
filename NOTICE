@@ -1,0 +1,50 @@
+diy-fido-key — third-party notices
+===================================
+
+This repository contains original code plus components fetched at build time.
+The build instructions pin the exact versions listed below.
+
+Project code
+------------------
+esp32-lcd/*, tools/*                 AGPL-3.0-or-later (see LICENSE)
+
+Firmware
+--------
+pico-fido          commit ade7702 (2026-10-19)   AGPL-3.0
+                   https://github.com/polhenarejos/pico-fido
+pico-keys-sdk      commit a2f0a51 (PicoKeys SDK 9.2)  AGPL-3.0
+                   https://github.com/polhenarejos/pico-keys-sdk
+
+The LCD status display patches pico-keys-sdk (src/main.c, CMake lists) and is
+applied by tools/install-esp32-lcd.sh. Modified files remain under AGPL-3.0.
+
+Build environment
+-----------------
+ESP-IDF v5.5.1     Apache-2.0
+
+Managed components (downloaded by the ESP-IDF component manager)
+----------------------------------------------------------------
+espressif/esp_tinyusb   Apache-2.0
+espressif/tinyusb       MIT
+espressif/mbedtls       Apache-2.0
+espressif/tinycbor      MIT
+zorxx/neopixel          MIT
+
+Font data
+---------
+The 5x7 glyph table in esp32-lcd/font5x7.h is derived from u8g2's
+u8x8_font_5x7_f (https://github.com/olikraus/u8g2, BSD-2-Clause).
+The underlying font is "-Misc-Fixed-Medium-R-Normal--7-70-75-75-C-50",
+which its header marks as public domain.
+
+Artwork
+-------
+The mascot image is embedded as esp32-lcd/mascot_80x80.h.
+
+  (C) 河西いつき
+
+Disclaimer
+----------
+This is a hobby project. The firmware is not certified, has no secure element,
+and is not intended as the only authentication factor for important accounts.
+No warranty is provided.

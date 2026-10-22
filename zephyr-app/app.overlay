@@ -1,0 +1,29 @@
+#include <zephyr/dt-bindings/pinctrl/esp32c3-pinctrl.h>
+
+/ {
+    chosen {
+        zephyr,console = &usb_serial;
+        zephyr,shell-uart = &usb_serial;
+        zephyr,fido2-up-input = &{/gpio_keys};
+    };
+    aliases {
+        led0 = &status_led;
+    };
+    leds {
+        compatible = "gpio-leds";
+        status_led: led_0 {
+            gpios = <&gpio0 8 GPIO_ACTIVE_LOW>;
+        };
+    };
+};
+
+&i2c0_default {
+    group1 {
+        pinmux = <I2C0_SDA_GPIO5>, <I2C0_SCL_GPIO6>;
+    };
+};
+
+&i2c0 { clock-frequency = <I2C_BITRATE_FAST>; };
+
+&spi2 { status = "disabled"; };
+&wifi { status = "disabled"; };

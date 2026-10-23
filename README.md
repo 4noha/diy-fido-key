@@ -5,6 +5,13 @@ FIDO2/WebAuthn パスキーデバイス（自作 YubiKey）。
 
 出典: <https://www.makeuseof.com/made-own-yubikey-less-than-8/>
 
+## 現在の状態（2026-10-23）
+
+- **ESP32-S3 ボードで USB FIDO2 キーとして動作**。`GetInfo`（CTAP 2.3 / 1024 bytes）、登録（packed）、認証（署名 71B）、**再起動後の資格情報の永続化**を実機で確認
+- 同じボードで **Flash Encryption (release) + Secure Boot v2 署名 (RSA-3072) + SDM** を有効化済み。以後の書き込みは **署名＋事前暗号化イメージ＋`--force`** が必要（[セキュリティプロファイル](#セキュリティプロファイルesp32-s3-の保護機能)）
+- LCD にキャラクター画像と状態（READY / PRESS / WORKING）を表示
+- ESP32-C3 の OLED / BLE(Zephyr) 版は**別系統の実験**として残している（USB HID は不可）
+
 ## 対象ハードウェア / 前提
 
 - **ESP32-S2 または ESP32-S3**（USB-OTG デバイスモードが必須）
@@ -26,6 +33,10 @@ YubiKey 風 OTP エミュレーション）を、PC から見て本物の USB �
 5. PC に挿すと HID オーセンティケータとして認識される
 6. PicoKey App で VID/PID をパッチ（OpenSC/ykman/GnuPG との互換用）
 ```
+
+このリポジトリでは Web ツールを使わず、**CLI でビルドして書き込む構成**も扱う（LCD 表示・
+Flash Encryption を含む）。手順は「ESP32-S3 + ST7735 LCD」と「セキュリティプロファイル」を参照。
+既に暗号化を有効にした個体では Web ツールでの書き込みはできない。
 
 ## 制約
 
@@ -57,11 +68,16 @@ esptool --chip esp32s3 --port /dev/cu.usbmodemXXXX write-flash 0x0 build/pico-fi
 ダウンロードモードは **BOOT(GPIO0) を押したまま USB を挿す**。書き込み後は BOOT を離して
 USB を挿し直す（押したままだと起動しない）。
 
+注意:
+
+- `tools/install-esp32-lcd.sh` は LCD に加えて **`patches/pico-fido-psram-shadow.patch`**（`part0` を PSRAM のシャドウに載せる）も適用する。ビルドスクリプトは PSRAM（OCT / 40MHz / `IGNORE_NOTFOUND`）を有効にする
+- 上の `write-flash` は **暗号化していない個体向け**。SDM（暗号化有効）の個体では失敗するので、[セキュリティプロファイル](#セキュリティプロファイルesp32-s3-の保護機能)の手順を使う
+
 ### LCD 設定（実機で確定）
 
 - `MADCTL 0x08`（BGR）/ オフセット `col=26, row=1` / **INVON**
 - 16bit カラーは **送信前にバイトスワップ必須**（ESP32 はリトルエンディアン、ST7735 は MSB first）。忘れると画像がモザイク状に崩れる
-- SPI クロックは **12MHz**（40MHz は ST7735 の仕様超過）
+- SPI クロックは **12MHz** で動作確認（ST7735 の書き込み上限は概ね 15MHz。40MHz は未検証）
 - ベンダーデモは TFT_eSPI の `TFT_eSPI(80,160)` + `setRotation(1)`。160x80 用の `GREENTAB160x80`（26,1 + INVON）に相当
 - キャラ画像は `tools/make-lcd-image.py` で白背景を輪郭からフラッドフィルして透過し、`esp32-lcd/mascot_80x80.h` に埋め込む
 - 校正用に `-DLCD_CALIBRATION=ON`（向き/オフセット/反転）と `-DLCD_COLOR_CAL=ON`（色順/バイト順）のビルドがある。BOOT 押下で候補を切り替える
@@ -73,19 +89,30 @@ USB を挿し直す（押したままだと起動しない）。
 - **Chrome からの WebAuthn も成功**（`tools/webauthn_local_test.py`、RP=`localhost:8787`）: `webauthn.create` → `webauthn.get`（署名 72 bytes、BOOT 承認）。サーバー側に challenge/credential を記録
 - LCD にキャラ画像＋状態表示（READY / PRESS BOOT / WORKING）を出す `esp32-lcd/` を追加。色・向き・バイト順は実機で確定済み
 
+### PIN（User Verification）
+
+UV を要求するサービス（ChatGPT など）では PIN が必要。設定は対話式で、PIN は画面に出ない:
+
+```sh
+.venv/bin/python tools/set_fido_pin.py
+```
+
 ### 落とし穴
 
 - **USB-Serial/JTAG のセカンダリコンソールを有効にしたままだと、TinyUSB(OTG) と GPIO19/20 を奪い合い、TG0WDT の起動ループになる。** `CONFIG_ESP_CONSOLE_SECONDARY_NONE=y` にする（ビルドスクリプトが自動適用）
 - フラッシュモードは **DIO** で動作確認（公式ビルドと同じ。QIO は未検証）
 - 書き込み後に HID として動いている間は `/dev/cu.*` が消えるため、再書き込みは毎回 BOOT+挿し直しが必要
+- Flash Encryption 有効後は **SDM** に入り、`read-flash` などの読み出しができない。書き込みは `--force` と事前暗号化イメージが必須で、**署名のないイメージは起動しない**
 
-## 現状
+## ESP32-C3（OLED / BLE Zephyr）の記録（2026-10-02）
+
+以下は C3 ボードでの実験記録。**C3 は USB-OTG を持たない**ため、USB FIDO は S3 側の話。
 
 - ユーザー指定の **ESP32-C3 + SSD1306 72×40 OLED** を実機テスト中（2026-10-02）。
 - PlatformIO / Arduino / U8g2 2.36.15 による書き込み・ハッシュ検証、アプリ起動、OLED 初期化・更新ログを確認済み。ユーザー目視でも枠・文字・数字の正常表示を確認済み。
 - OLED: SDA=GPIO5 / SCL=GPIO6 / 0x3C。128×64 バッファ内の `(28,24)` に 72×40 を描画。
 - I²C 検出後は `Wire.end()` を呼び、U8g2 に再初期化させる。省略時は OLED 初期化が進まなかった。
-- FIDO ファームウェアは未着手。C3 の USB HID 制約を踏まえた移植方法は別途検討。
+- C3 では USB HID が使えないため、FIDO は BLE + Zephyr 構成で実装した（下記）。
 
 ### 書き込み・OLED テスト
 
@@ -104,7 +131,7 @@ pio device monitor -b 115200
 ユーザー提示の Zephyr FIDO2 サンプルを基に **ESP32-C3 向け BLE 版を実装・書き込み中**。下記の pico-fido 固定方針から、BLE を持つ Zephyr FIDO2 サブシステムに切り替えた。認証済みペアリング（security level 4、bond 保存）・分割 PING・GetInfo（FIDO 2.0/2.1）まで実機で確認済み。登録・自己 attestation・認証署名・再起動後の再認証まで専用クライアントで検証済み。
 
 - C3 の内蔵 USB はシリアル/JTAG 固定で HID に変更できない。[Espressif の仕様](https://docs.espressif.com/projects/esp-idf/en/v5.0/esp32c3/api-guides/usb-serial-jtag-console.html)
-- 調査用に `vendor/pico-fido` を取得（Git 対象外）。本体 revision `f01fa1e2817a845e44d788f3f633a1f122ce332e`、SDK revision `50699e53e8ada214c27f6c9b66ea3b6f127fc655`。本体 `src/fido/CMakeLists.txt` と SDK の ESP-IDF コンポーネントは `esp_tinyusb` に依存する。BLE の通信処理を追加する必要がある。
+- 調査用に `vendor/pico-fido` を取得（Git 対象外）。当時の revision は本体 `f01fa1e` / SDK `50699e5`（現在の S3 ビルドは `ade7702` / `a2f0a51`）。本体 `src/fido/CMakeLists.txt` と SDK の ESP-IDF コンポーネントは `esp_tinyusb` に依存する。BLE の通信処理を追加する必要がある。
 - 従来の FIDO BLE は GATT primary service `0xFFFD` を使い、暗号化・ペアリングと CTAP メッセージの分割/再構成が必要。[FIDO CTAP 仕様](https://fidoalliance.org/specs/fido-v2.1-ps-20210615/fido-client-to-authenticator-protocol-v2.1-ps-20210615.html)
 - 現行 Chromium の `FidoDiscoveryFactory::Create` は `kBluetoothLowEnergy` で空のリストを返す。従来の BLE キーを広告するだけでは Chrome から直接使えない。`kHybrid` は別の caBLE v2 discovery を使う。[Chromium ソース](https://chromium.googlesource.com/chromium/src/+/main/device/fido/fido_discovery_factory.cc)
 - 専用 BLE クライアントによる実機テストを用意した。広告/GetInfo のみでは完成した FIDO 認証器とは扱わず、登録・ボタン確認・署名検証・再起動後の認証までを検証する。
@@ -140,6 +167,68 @@ esptool --port /dev/cu.usbmodem4101 write-flash 0 build/zephyr/zephyr/zephyr.bin
 
 参照: [Zephyr FIDO2 サンプル](https://docs.zephyrproject.org/latest/samples/subsys/authentication/fido2/README.html)。アプリ独自部分は Apache-2.0、U8g2 と Zephyr は各上流のライセンスに従う。
 
+
+### （C3 のみ）暗号化バックアップ
+
+2026-10-02 の現在の全フラッシュ（4MB、ファームウェア・BLE bond・FIDO 資格情報）を `backups/esp32c3-fido-20261002.aesgcm` に AES-256-GCM で保存した。復号鍵は `~/.config/diy-fido-key/backup-keys/esp32c3-fido-20261002.key`。どちらも Git 対象外、ファイル権限600。両方を紛失しないよう別々に保管する。鍵ファイルの内容は共有しない。
+
+`backups/esp32c3-fido-20261002.json` に元イメージの SHA-256、サイズ、ボード MAC と対象コミットを記録。復号後の4MBが元の読み出しと完全一致することを確認し、一時的な平文は削除した。実機への復元書き込みは未検証。
+
+復元が必要になった場合のみ、同じボード（同じボード）へ以下を実施する。現在の資格情報・ペアリング情報・署名カウンターもバックアップ時点へ戻る。復号画像は秘密鍵を含むため、書き込み後に削除する。
+
+```sh
+.venv/bin/python tools/flash_backup.py decrypt \
+  backups/esp32c3-fido-20261002.aesgcm backups/restore-private.bin \
+  --key ~/.config/diy-fido-key/backup-keys/esp32c3-fido-20261002.key
+esptool --port /dev/cu.usbmodem4101 write-flash 0 backups/restore-private.bin
+rm backups/restore-private.bin
+```
+
+なお **S3 側は SDM のためフラッシュ読み出しができず、同様のイメージバックアップは取得できない**（資格情報の退避はサービスの再登録で行う）。
+
+電源断でも bond と資格情報はフラッシュに残る。再起動後の認証は検証済み。PC 側のペアリング情報はこのバックアップに含まれない。古いバックアップの復元ではカウンターが戻るため、サービス側で警告や拒否が起きる可能性がある。
+
+### （C3 のみ）ES256 秘密鍵を USB から取り込む
+
+`tools/import_fido_key.py` と `zephyr-app/src/key_import.c` を追加。起動後、BLE を開始する前の5秒間だけ USB Serial/JTAG で取り込み要求を受け付ける。要求がなければ通常の BLE モードへ進む。PC ツールがポートを開くと通常はボードがリセットされる。必要なら BOOT を押さず RESET のみを押す（BOOT+RESET は ROM 書き込みモードになる）。
+
+取り込み要求には P-256 秘密スカラー、RP ID、ユーザーハンドル、資格情報 ID、署名カウンターを含める。OLED の RP 表示を確認して新たに BOOT を押すと保存する（確認時間120秒）。取り込み中は BLE/CTAP を起動しない。既存 ID は拒否し、他の資格情報を削除・上書きしない。保存に失敗した場合は新しい PSA 鍵を破棄する。保存後に再起動して BLE に戻る。秘密鍵を USB の応答やログへ出力しない。秘密鍵を含む受信バッファは処理後にゼロ化する。USB 転送自体は暗号化していないため、自分の PC から直接接続して使う。
+
+PEM（PKCS#8 または EC PRIVATE KEY、暗号化 PEM は対話パスワード入力）:
+
+```sh
+.venv/bin/python tools/import_fido_key.py --pem /path/to/private-key.pem \
+  --rp example.com --user-id 75736572 --output backups/imported-public.json
+# 既存資格情報を移植する場合は --credential-id HEX --counter N も指定する
+```
+
+Bitwarden の非暗号化 JSON エクスポートから指定 RP のパスキー1件のみを取り込む:
+
+```sh
+.venv/bin/python tools/import_fido_key.py --bitwarden /path/to/export.json \
+  --rp example.com --output backups/imported-public.json
+```
+
+Bitwarden の PKCS#8 DER、Base64URL の userHandle、および GUID / `b64.` の credentialId を解釈し、元の ID とカウンターを保持する。同じ RP に複数の項目がある場合は自動選択せず拒否する。ID の解釈は [Bitwarden credential-id-utils](https://github.com/bitwarden/clients/blob/main/libs/common/src/platform/services/fido2/credential-id-utils.ts) と [guid-utils](https://github.com/bitwarden/clients/blob/main/libs/common/src/platform/services/fido2/guid-utils.ts) に合わせた。
+
+出力 JSON は公開鍵・資格情報 ID・RP・カウンターのみ。取り込み前に保存するため、USB が保存直後に切れても資格情報 ID を失わない。ファイルの存在は取り込み成功を意味しない。成功はデバイスから返った公開点と元の公開鍵の一致で確認する。取り込んだ鍵は PSA の署名用途の永続鍵にし、秘密鍵の個別エクスポート権限は付けない。
+
+```sh
+.venv/bin/python tools/ble_fido_test.py authenticate \
+  --rp example.com --credential backups/imported-public.json
+```
+
+これは専用クライアントのランダムなテスト challenge に対する署名検証であり、実サービスへのログイン成功を示さない。サービスには対応する公開鍵・資格情報 ID が登録済みである必要がある。実サービスを含むブラウザログインは現行の従来 BLE トランスポートでは未対応。旧バックアップは取り込み前の状態なので、新しい鍵を含めたい場合はバックアップを更新する。
+
+USB 取り込み実機検証: テスト用 P-256 PEM の取り込み、公開点の一致、再起動後の BLE 認証署名・RP ハッシュ・UP フラグ・カウンター1を確認。実サービスの Bitwarden 項目も取り込み、公開点の一致・再起動後のローカル認証署名・RP ハッシュ・UP フラグ・カウンター1を確認。同一資格情報IDの再取り込みは EEXIST で拒否され、上書きされないことを実機確認。16バイト等の取り込みIDを扱うため、Zephyr の allow/exclude list 検索を保存済みIDの検索優先に変更した（`patches/zephyr-imported-credential-ids.patch`、ビルド時に自動適用）。RP ハッシュの照合と wrapped ID の復号検証は維持する。
+
+取り込み後の最新バックアップは `backups/esp32c3-fido-after-import-20261002.aesgcm`、対応する復号鍵は `~/.config/diy-fido-key/backup-keys/esp32c3-fido-after-import-20261002.key`。実サービスとテスト用の取り込み資格情報も含む。復号後の4MBと読み出し元の完全一致を確認し、平文の一時画像は削除済み。復元時は上記の復元例のバックアップ名と鍵名をこの組み合わせに置き換える。旧バックアップも保持している。
+
+### （C3 のみ）Mac の Chrome 向け HID ブリッジ（プロトタイプ）
+
+`mac-bridge/` と `tools/mac_ble_hid_bridge.py` は、Mac 内の仮想 FIDO HID と C3 の認証済み BLE リンクを中継する。BLE 準備後に HID を公開する。INIT / CBOR / PING / CANCEL / KEEPALIVE、チャンネル管理と分割を実装。秘密鍵はボード内で使用する。
+
+macOS 26.5 で native ビルドとプロトコルテストを確認済み。ただし仮想 HID 作成は `com.apple.developer.hid.virtual.device` がないため実機で拒否された。Developer アカウントと開発証明書はあるが、現在のローカルプロファイルに当該権限はない。Chrome 認識・実サービスログインはまだ検証できていない。Apple の正式な権限付与と対応する macOS profile が必要。署名手順と申請文案は [mac-bridge/README.md](mac-bridge/README.md) を参照。
 
 ## ファームウェアを公開・配布する場合
 
@@ -183,13 +272,13 @@ FIDO_USB_VID=0x1209 FIDO_USB_PID=0x0001 sh tools/build-pico-fido-esp32s3.sh
 
 ## セキュリティプロファイル（ESP32-S3 の保護機能）
 
-`tools/security-profiles.sh` で保護レベルを切り替えます。**eFuse を焼く操作は行いません**（ビルドと手順書のみ）。
+`tools/security-profiles.sh` で保護レベルを切り替えます。**スクリプトは eFuse を焼きません**（ビルドと手順書のみ）。実機では下記の eFuse が既に焼かれています。
 
 | プロファイル | Secure Boot | Flash Encryption | 用途 |
 |---|---|---|---|
 | `backup` | なし | なし | 開発・検証（再書き込み自由） |
-| `encrypted` | RSA-3072（署名のみ） | development | 暗号化の試行 |
-| `encrypted-release` | なし | release | Secure Boot なしの暗号化 |
+| `encrypted` | RSA-3072 で署名（eFuse は焼かない） | development | 暗号化の試行 |
+| `encrypted-release` | なし | release | 暗号化の試行用。**SDM では署名なしのため起動しない**（実測） |
 | `secure` | RSA-3072（署名） | release | **実機で動作確認した構成** |
 
 ### 実機で確定した構成（2026-10-23）
@@ -214,73 +303,22 @@ sh tools/security-profiles.sh secure
 esptool --port /dev/cu.usbmodemXXXX write-flash --force 0x0 build/pico-fido-secure/pico_fido_secure.enc.bin
 ```
 
+書き込み後は BOOT を離して USB を挿し直す。`part0` のレイアウトを変えた場合だけ
+`esptool --port ... erase-region 0x200000 0x100000` で保存領域を作り直す。
+
 ### 実機で確認できたこと
 
 - `GetInfo`（CTAP 2.3 / max 1024）、登録（packed / UP+AT）、認証（署名 71B / counter）、**再起動後の永続化**、LCD 表示
 - eFuse 状態: `BLOCK_KEY0` に XTS 鍵、`SPI_BOOT_CRYPT_CNT = 0b001`、`SECURE_BOOT_EN` は未焼（署名は SDM 要求のため付与）
+- 実機で実行した eFuse 操作（**一方通行**）:
+
+```sh
+espefuse.py --port /dev/cu.usbmodemXXXX burn_key BLOCK_KEY0 flash-encryption-key.bin XTS_AES_128_KEY
+espefuse.py --port /dev/cu.usbmodemXXXX burn_efuse SPI_BOOT_CRYPT_CNT 0x1
+```
 
 ## 参考リンク
 
 - 紹介記事: <https://www.makeuseof.com/made-own-yubikey-less-than-8/>
 - ファームウェア本体: <https://github.com/polhenarejos/pico-fido>
 - Web 書き込みツール: <https://picokeys.com/esp32-flasher/>
-
-### 同じボード向けの暗号化バックアップ
-
-2026-10-02 の現在の全フラッシュ（4MB、ファームウェア・BLE bond・FIDO 資格情報）を `backups/esp32c3-fido-20261002.aesgcm` に AES-256-GCM で保存した。復号鍵は `~/.config/diy-fido-key/backup-keys/esp32c3-fido-20261002.key`。どちらも Git 対象外、ファイル権限600。両方を紛失しないよう別々に保管する。鍵ファイルの内容は共有しない。
-
-`backups/esp32c3-fido-20261002.json` に元イメージの SHA-256、サイズ、ボード MAC と対象コミットを記録。復号後の4MBが元の読み出しと完全一致することを確認し、一時的な平文は削除した。実機への復元書き込みは未検証。
-
-復元が必要になった場合のみ、同じボード（同じボード）へ以下を実施する。現在の資格情報・ペアリング情報・署名カウンターもバックアップ時点へ戻る。復号画像は秘密鍵を含むため、書き込み後に削除する。
-
-```sh
-.venv/bin/python tools/flash_backup.py decrypt \
-  backups/esp32c3-fido-20261002.aesgcm backups/restore-private.bin \
-  --key ~/.config/diy-fido-key/backup-keys/esp32c3-fido-20261002.key
-esptool --port /dev/cu.usbmodem4101 write-flash 0 backups/restore-private.bin
-rm backups/restore-private.bin
-```
-
-電源断でも bond と資格情報はフラッシュに残る。再起動後の認証は検証済み。PC 側のペアリング情報はこのバックアップに含まれない。古いバックアップの復元ではカウンターが戻るため、サービス側で警告や拒否が起きる可能性がある。
-
-### 任意の ES256 秘密鍵を USB から取り込む
-
-`tools/import_fido_key.py` と `zephyr-app/src/key_import.c` を追加。起動後、BLE を開始する前の5秒間だけ USB Serial/JTAG で取り込み要求を受け付ける。要求がなければ通常の BLE モードへ進む。PC ツールがポートを開くと通常はボードがリセットされる。必要なら BOOT を押さず RESET のみを押す（BOOT+RESET は ROM 書き込みモードになる）。
-
-取り込み要求には P-256 秘密スカラー、RP ID、ユーザーハンドル、資格情報 ID、署名カウンターを含める。OLED の RP 表示を確認して新たに BOOT を押すと保存する（確認時間120秒）。取り込み中は BLE/CTAP を起動しない。既存 ID は拒否し、他の資格情報を削除・上書きしない。保存に失敗した場合は新しい PSA 鍵を破棄する。保存後に再起動して BLE に戻る。秘密鍵を USB の応答やログへ出力しない。秘密鍵を含む受信バッファは処理後にゼロ化する。USB 転送自体は暗号化していないため、自分の PC から直接接続して使う。
-
-PEM（PKCS#8 または EC PRIVATE KEY、暗号化 PEM は対話パスワード入力）:
-
-```sh
-.venv/bin/python tools/import_fido_key.py --pem /path/to/private-key.pem \
-  --rp example.com --user-id 75736572 --output backups/imported-public.json
-# 既存資格情報を移植する場合は --credential-id HEX --counter N も指定する
-```
-
-Bitwarden の非暗号化 JSON エクスポートから指定 RP のパスキー1件のみを取り込む:
-
-```sh
-.venv/bin/python tools/import_fido_key.py --bitwarden /path/to/export.json \
-  --rp example.com --output backups/imported-public.json
-```
-
-Bitwarden の PKCS#8 DER、Base64URL の userHandle、および GUID / `b64.` の credentialId を解釈し、元の ID とカウンターを保持する。同じ RP に複数の項目がある場合は自動選択せず拒否する。ID の解釈は [Bitwarden credential-id-utils](https://github.com/bitwarden/clients/blob/main/libs/common/src/platform/services/fido2/credential-id-utils.ts) と [guid-utils](https://github.com/bitwarden/clients/blob/main/libs/common/src/platform/services/fido2/guid-utils.ts) に合わせた。
-
-出力 JSON は公開鍵・資格情報 ID・RP・カウンターのみ。取り込み前に保存するため、USB が保存直後に切れても資格情報 ID を失わない。ファイルの存在は取り込み成功を意味しない。成功はデバイスから返った公開点と元の公開鍵の一致で確認する。取り込んだ鍵は PSA の署名用途の永続鍵にし、秘密鍵の個別エクスポート権限は付けない。
-
-```sh
-.venv/bin/python tools/ble_fido_test.py authenticate \
-  --rp example.com --credential backups/imported-public.json
-```
-
-これは専用クライアントのランダムなテスト challenge に対する署名検証であり、実サービスへのログイン成功を示さない。サービスには対応する公開鍵・資格情報 ID が登録済みである必要がある。実サービスを含むブラウザログインは現行の従来 BLE トランスポートでは未対応。旧バックアップは取り込み前の状態なので、新しい鍵を含めたい場合はバックアップを更新する。
-
-USB 取り込み実機検証: テスト用 P-256 PEM の取り込み、公開点の一致、再起動後の BLE 認証署名・RP ハッシュ・UP フラグ・カウンター1を確認。実サービスの Bitwarden 項目も取り込み、公開点の一致・再起動後のローカル認証署名・RP ハッシュ・UP フラグ・カウンター1を確認。同一資格情報IDの再取り込みは EEXIST で拒否され、上書きされないことを実機確認。16バイト等の取り込みIDを扱うため、Zephyr の allow/exclude list 検索を保存済みIDの検索優先に変更した（`patches/zephyr-imported-credential-ids.patch`、ビルド時に自動適用）。RP ハッシュの照合と wrapped ID の復号検証は維持する。
-
-取り込み後の最新バックアップは `backups/esp32c3-fido-after-import-20261002.aesgcm`、対応する復号鍵は `~/.config/diy-fido-key/backup-keys/esp32c3-fido-after-import-20261002.key`。実サービスとテスト用の取り込み資格情報も含む。復号後の4MBと読み出し元の完全一致を確認し、平文の一時画像は削除済み。復元時は上記の復元例のバックアップ名と鍵名をこの組み合わせに置き換える。旧バックアップも保持している。
-
-### Mac の Chrome 向け HID ブリッジ（プロトタイプ）
-
-`mac-bridge/` と `tools/mac_ble_hid_bridge.py` は、Mac 内の仮想 FIDO HID と C3 の認証済み BLE リンクを中継する。BLE 準備後に HID を公開する。INIT / CBOR / PING / CANCEL / KEEPALIVE、チャンネル管理と分割を実装。秘密鍵はボード内で使用する。
-
-macOS 26.5 で native ビルドとプロトコルテストを確認済み。ただし仮想 HID 作成は `com.apple.developer.hid.virtual.device` がないため実機で拒否された。Developer アカウントと開発証明書はあるが、現在のローカルプロファイルに当該権限はない。Chrome 認識・実サービスログインはまだ検証できていない。Apple の正式な権限付与と対応する macOS profile が必要。署名手順と申請文案は [mac-bridge/README.md](mac-bridge/README.md) を参照。

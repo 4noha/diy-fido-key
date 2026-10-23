@@ -183,31 +183,41 @@ FIDO_USB_VID=0x1209 FIDO_USB_PID=0x0001 sh tools/build-pico-fido-esp32s3.sh
 
 ## セキュリティプロファイル（ESP32-S3 の保護機能）
 
-`tools/security-profiles.sh` で3段階を切り替えられます。**スクリプトはビルドのみ**を行い、eFuse の書き込みは行いません（実機に触れません）。
+`tools/security-profiles.sh` で保護レベルを切り替えます。**eFuse を焼く操作は行いません**（ビルドと手順書のみ）。
 
-| プロファイル | 内容 | 再書き込み | フラッシュ読み出し |
+| プロファイル | Secure Boot | Flash Encryption | 用途 |
 |---|---|---|---|
-| `backup`（既定） | 保護なし | 自由 | 可能（現状） |
-| `encrypted` | Secure Boot v2（ECDSA P-256）+ Flash Encryption **development** | 署名＋暗号化イメージで可 | 実質不可（鍵は開発モードで読める） |
-| `secure` | Secure Boot v2 + Flash Encryption **release** | 署名前提（鍵必須） | 不可 |
+| `backup` | なし | なし | 開発・検証（再書き込み自由） |
+| `encrypted` | RSA-3072（署名のみ） | development | 暗号化の試行 |
+| `encrypted-release` | なし | release | Secure Boot なしの暗号化 |
+| `secure` | RSA-3072（署名） | release | **実機で動作確認した構成** |
+
+### 実機で確定した構成（2026-10-23）
+
+- **ESP32-S3 の Secure Boot v2 は RSA-3072 のみ**（ECDSA は非対応）。ECDSA 鍵では起動時に署名検証で失敗する
+- Flash Encryption を有効にすると **Secure Download Mode (SDM)** になる。SDM では `read-flash` / `chip-id` / eFuse 読み出しが不可で、**署名済みブートローダが必要**。書き込みは `--force` と事前暗号化イメージで行う
+- pico-fido は `part0` を **mmap** するが、暗号化有効時は mmap が復号するため平文 FS と一致しない。`patches/pico-fido-psram-shadow.patch` で **PSRAM 上のシャドウ**に置き換え、`esp_flash_read/write`（平文）で読み書きする。`part0` は暗号化フラグを付けない
+- PSRAM は **40MHz**、`CONFIG_SPIRAM_IGNORE_NOTFOUND=y`（未搭載でも起動）
+
+### 鍵
+
+- 署名鍵（RSA-3072）: `~/.config/diy-fido-key/secure-boot/secure-boot-rsa3072.pem`
+- フラッシュ暗号化鍵: `~/.config/diy-fido-key/secure-boot/flash-encryption-key.bin`
+- どちらも **オフラインで2箇所保管**。失うと更新不可
+
+### 焼き方（SDM 有効後）
 
 ```sh
-. ~/esp/esp-idf-v5.5.1/export.sh
-sh tools/security-profiles.sh backup      # 従来どおり
-sh tools/security-profiles.sh encrypted   # 署名 + 暗号化（開発モード）
-sh tools/security-profiles.sh secure      # 署名 + 暗号化（リリース）
+# ビルド（事前暗号化まで）
+sh tools/security-profiles.sh secure
+# 書き込み（SDM では --force、スタブなし）
+esptool --port /dev/cu.usbmodemXXXX write-flash --force 0x0 build/pico-fido-secure/pico_fido_secure.enc.bin
 ```
 
-- 署名鍵は `~/.config/diy-fido-key/secure-boot/secure-boot-ecdsa-p256.pem`（0600、リポジトリ外）に生成されます。**オフラインで2箇所に保管してください**
-- 出力: `build/pico-fido-<profile>/pico_fido_<profile>.bin` と `FLASH-AND-BURN.md`（eFuse 焼き順）
-- Secure Boot を有効にすると署名でブートローダが 32KB を超えるため、**パーティションテーブルは 0x10000** に移動します（マージ済みイメージがその配置を含みます）
+### 実機で確認できたこと
 
-### eFuse を焼く前に
-
-- `secure` は **元の無防備な状態に戻せません**（署名済みイメージでの更新のみ可能）
-- 署名鍵を失うと更新不能。バックアップを必ず取得
-- ダウンロードモードは塞がないこと（復旧経路を残す）
-- pico-fido の Secure Lock（MKEK を OTP へ）は Secure Boot 有効後に PicoKey App から実行
+- `GetInfo`（CTAP 2.3 / max 1024）、登録（packed / UP+AT）、認証（署名 71B / counter）、**再起動後の永続化**、LCD 表示
+- eFuse 状態: `BLOCK_KEY0` に XTS 鍵、`SPI_BOOT_CRYPT_CNT = 0b001`、`SECURE_BOOT_EN` は未焼（署名は SDM 要求のため付与）
 
 ## 参考リンク
 

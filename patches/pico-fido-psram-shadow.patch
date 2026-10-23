@@ -1,0 +1,80 @@
+diff --git a/src/fs/low_flash.c b/src/fs/low_flash.c
+index 5ac7185..1d7578f 100644
+--- a/src/fs/low_flash.c
++++ b/src/fs/low_flash.c
+@@ -32,10 +32,23 @@
+  #ifdef ESP_PLATFORM
+   #include "compat/esp_compat.h"
+   #include "esp_partition.h"
++  #include "esp_heap_caps.h"
++  #include "esp_flash.h"
+   const esp_partition_t *part0;
++  uint8_t *fido_flash_shadow;
++  static esp_err_t fido_flash_erase_shadow(size_t off, size_t len) {
++      esp_err_t err = esp_partition_erase_range(part0, off, len);
++      if (err == ESP_OK && fido_flash_shadow) memset(fido_flash_shadow + off, 0xFF, len);
++      return err;
++  }
++  static esp_err_t fido_flash_program_shadow(size_t off, const void *src, size_t len) {
++      esp_err_t err = esp_partition_write(part0, off, src, len);
++      if (err == ESP_OK && fido_flash_shadow) memcpy(fido_flash_shadow + off, src, len);
++      return err;
++  }
+   #define save_and_disable_interrupts() 1
+-  #define flash_range_erase(a,b) esp_partition_erase_range(part0, a, b)
+-  #define flash_range_program(a,b,c) esp_partition_write(part0, a, b, c);
++  #define flash_range_erase(a,b) fido_flash_erase_shadow(a, b)
++  #define flash_range_program(a,b,c) fido_flash_program_shadow(a, b, c);
+   #define restore_interrupts(a) (void)a
+  #else
+   #ifdef _MSC_VER
+@@ -352,8 +365,19 @@ void low_flash_task(void) {
+         }
+ #ifdef ESP_PLATFORM
+         if (flash_updated && multicore_lockout_start_timeout_us(1000)) {
+-            esp_partition_munmap(fd_map);
+-            esp_partition_mmap(part0, 0, part0->size, ESP_PARTITION_MMAP_DATA, (const void **)&map, (esp_partition_mmap_handle_t *)&fd_map);
++            if (fido_flash_shadow != NULL) {
++                uint8_t *bounce = heap_caps_malloc(4096, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
++                if (bounce != NULL) {
++                    for (size_t off = 0; off < part0->size; off += 4096) {
++                        size_t chunk = (part0->size - off) < 4096 ? (part0->size - off) : 4096;
++                        if (esp_flash_read(NULL, bounce, part0->address + off, chunk) != ESP_OK) {
++                            break;
++                        }
++                        memcpy(fido_flash_shadow + off, bounce, chunk);
++                    }
++                    heap_caps_free(bounce);
++                }
++            }
+             multicore_lockout_end_timeout_us(1000);
+         }
+ #endif
+@@ -556,7 +580,26 @@ void low_flash_init(void) {
+     uint32_t data_end_addr;
+ #if defined(ESP_PLATFORM)
+     part0 = esp_partition_find_first(0x40, 0x1, "part0");
+-    esp_partition_mmap(part0, 0, part0->size, ESP_PARTITION_MMAP_DATA, (const void **)&map, (esp_partition_mmap_handle_t *)&fd_map);
++    fido_flash_shadow = heap_caps_malloc(part0->size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
++    if (fido_flash_shadow != NULL) {
++        uint8_t *bounce = heap_caps_malloc(4096, MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA);
++        if (bounce != NULL) {
++            for (size_t off = 0; off < part0->size; off += 4096) {
++                size_t chunk = (part0->size - off) < 4096 ? (part0->size - off) : 4096;
++                if (esp_flash_read(NULL, bounce, part0->address + off, chunk) != ESP_OK) {
++                    break;
++                }
++                memcpy(fido_flash_shadow + off, bounce, chunk);
++            }
++            heap_caps_free(bounce);
++        }
++    }
++    if (fido_flash_shadow != NULL) {
++        map = fido_flash_shadow;
++    }
++    else {
++        esp_partition_mmap(part0, 0, part0->size, ESP_PARTITION_MMAP_DATA, (const void **)&map, (esp_partition_mmap_handle_t *)&fd_map);
++    }
+     data_start_addr = 0;
+     data_end_addr = part0->size;
+     FLASH_SIZE_BYTES = part0->size;

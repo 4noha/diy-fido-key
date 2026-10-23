@@ -36,8 +36,20 @@ replacements = {
     '# CONFIG_ESPTOOLPY_FLASHMODE_DIO is not set': 'CONFIG_ESPTOOLPY_FLASHMODE_DIO=y',
     'CONFIG_ESPTOOLPY_FLASHMODE="qio"': 'CONFIG_ESPTOOLPY_FLASHMODE="dio"',
 }
+spiram = {
+    'CONFIG_SPIRAM': 'y',
+    'CONFIG_SPIRAM_MODE_OCT': 'y',
+    'CONFIG_SPIRAM_SPEED_80M': 'y',
+    'CONFIG_SPIRAM_USE_MALLOC': 'y',
+    'CONFIG_SPIRAM_BOOT_INIT': 'y',
+    'CONFIG_SPIRAM_IGNORE_NOTFOUND': 'y',
+}
 for old, new in replacements.items():
     text = text.replace(old, new)
+for name, value in spiram.items():
+    lines = [l for l in text.splitlines() if not l.startswith(name + '=')]
+    lines.append('%s=%s' % (name, value))
+    text = '\n'.join(lines) + '\n'
 open(path, 'w').write(text)
 PY
 fi

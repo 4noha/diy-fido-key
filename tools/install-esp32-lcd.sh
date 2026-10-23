@@ -33,7 +33,7 @@ if ! grep -q 'src/lcd' "$COMP"; then
     perl -0pi -e 's{(\$\{PICOKEYS_SDK_DIR\}/src/led\n)}{$1    \$\{PICOKEYS_SDK_DIR\}/src/lcd\n}' "$COMP"
 fi
 if ! grep -q 'esp_driver_spi' "$COMP"; then
-    perl -0pi -e 's{(\n\s*mbedtls\n\))}{\n    mbedtls\n    esp_driver_spi\n)}' "$COMP"
+    perl -0pi -e 's{(\n\s*mbedtls\n\))}{\n    mbedtls\n    esp_driver_spi\n    esp_psram\n)}' "$COMP"
 fi
 if ! grep -q 'FIDO_STATUS_LCD' "$COMP"; then
     perl -0pi -e 's{(idf_component_set_property\(\$\{COMPONENT_NAME\} WHOLE_ARCHIVE ON\))}{target_compile_definitions(\$\{COMPONENT_LIB\} PUBLIC FIDO_STATUS_LCD=1)\n\noption(LCD_CALIBRATION "Build the panel calibration UI" OFF)\nif(LCD_CALIBRATION)\n    target_compile_definitions(\$\{COMPONENT_LIB\} PUBLIC LCD_CALIBRATION=1)\nendif()\n\n$1}' "$COMP"
@@ -42,6 +42,16 @@ fi
 TOP="$ROOT/vendor/pico-fido/CMakeLists.txt"
 if ! grep -q 'NOT DEFINED USB_VID' "$TOP"; then
     perl -0pi -e 's{set\(USB_VID 0x2E8A\)\nset\(USB_PID 0x10FE\)}{if(NOT DEFINED USB_VID)\n    set(USB_VID 0x2E8A)\nendif()\nif(NOT DEFINED USB_PID)\n    set(USB_PID 0x10FE)\nendif()}' "$TOP"
+fi
+
+
+# --- ESP32 flash-encryption workaround: keep part0 in a PSRAM shadow ---
+# pico-fido mmaps part0, but flash encryption decrypts every mapping, so the
+# credential filesystem cannot round-trip. Replace the mapping with a RAM
+# shadow fed by plaintext esp_flash_read/write calls.
+SHADOW_PATCH="$ROOT/patches/pico-fido-psram-shadow.patch"
+if [ -f "$SHADOW_PATCH" ] && ! grep -q 'fido_flash_shadow' "$SDK/src/fs/low_flash.c"; then
+    (cd "$SDK" && patch -p1 < "$SHADOW_PATCH")
 fi
 
 MAIN="$SDK/src/main.c"

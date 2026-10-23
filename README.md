@@ -180,6 +180,35 @@ FIDO_USB_VID=0x1209 FIDO_USB_PID=0x0001 sh tools/build-pico-fido-esp32s3.sh
 
 「FIDO 認証・セキュアエレメントなし、個人・実験用途、無保証」を明記してください。`YubiKey` や `Pico` を製品名に使わないこと。
 
+
+## セキュリティプロファイル（ESP32-S3 の保護機能）
+
+`tools/security-profiles.sh` で3段階を切り替えられます。**スクリプトはビルドのみ**を行い、eFuse の書き込みは行いません（実機に触れません）。
+
+| プロファイル | 内容 | 再書き込み | フラッシュ読み出し |
+|---|---|---|---|
+| `backup`（既定） | 保護なし | 自由 | 可能（現状） |
+| `encrypted` | Secure Boot v2（ECDSA P-256）+ Flash Encryption **development** | 署名＋暗号化イメージで可 | 実質不可（鍵は開発モードで読める） |
+| `secure` | Secure Boot v2 + Flash Encryption **release** | 署名前提（鍵必須） | 不可 |
+
+```sh
+. ~/esp/esp-idf-v5.5.1/export.sh
+sh tools/security-profiles.sh backup      # 従来どおり
+sh tools/security-profiles.sh encrypted   # 署名 + 暗号化（開発モード）
+sh tools/security-profiles.sh secure      # 署名 + 暗号化（リリース）
+```
+
+- 署名鍵は `~/.config/diy-fido-key/secure-boot/secure-boot-ecdsa-p256.pem`（0600、リポジトリ外）に生成されます。**オフラインで2箇所に保管してください**
+- 出力: `build/pico-fido-<profile>/pico_fido_<profile>.bin` と `FLASH-AND-BURN.md`（eFuse 焼き順）
+- Secure Boot を有効にすると署名でブートローダが 32KB を超えるため、**パーティションテーブルは 0x10000** に移動します（マージ済みイメージがその配置を含みます）
+
+### eFuse を焼く前に
+
+- `secure` は **元の無防備な状態に戻せません**（署名済みイメージでの更新のみ可能）
+- 署名鍵を失うと更新不能。バックアップを必ず取得
+- ダウンロードモードは塞がないこと（復旧経路を残す）
+- pico-fido の Secure Lock（MKEK を OTP へ）は Secure Boot 有効後に PicoKey App から実行
+
 ## 参考リンク
 
 - 紹介記事: <https://www.makeuseof.com/made-own-yubikey-less-than-8/>

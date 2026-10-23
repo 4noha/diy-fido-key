@@ -306,6 +306,32 @@ esptool --port /dev/cu.usbmodemXXXX write-flash --force 0x0 build/pico-fido-secu
 書き込み後は BOOT を離して USB を挿し直す。`part0` のレイアウトを変えた場合だけ
 `esptool --port ... erase-region 0x200000 0x100000` で保存領域を作り直す。
 
+### 再書き込み不可にする（任意・一方通行）
+
+「もう書き換えさせない」ための操作。**どれも戻せません**。完成したイメージで十分に
+動作確認してから、最後に実施します。
+
+| 操作 | 効果 | 戻せる |
+|---|---|---|
+| `SECURE_BOOT_EN` + digest | 署名済みイメージのみ起動（更新は署名鍵が必要） | ✗ |
+| `DIS_DOWNLOAD_MODE` | ROM ダウンロードモードを無効化＝**再書き込み不可** | ✗ |
+| `DIS_USB_JTAG` / `DIS_PAD_JTAG` | JTAG 経路を無効化 | ✗ |
+| pico-fido Secure Lock | MKEK を OTP に固定（資格情報を端末に紐付け） | ✗ |
+
+```sh
+# 最後に実行する。事前に署名済みイメージでの起動確認と鍵の退避を済ませること
+espefuse.py --port /dev/cu.usbmodemXXXX burn_efuse DIS_DOWNLOAD_MODE
+espefuse.py --port /dev/cu.usbmodemXXXX burn_efuse DIS_USB_JTAG
+```
+
+注意:
+
+- `DIS_DOWNLOAD_MODE` を焼くと **二度と書き込めない**（失敗時は基板ごと交換）
+- 署名鍵・暗号化鍵の控えがない状態で焼かない
+- 現行機は **未実施**（`DIS_DOWNLOAD_MODE` は未焼）なので、まだ更新できる
+- 書き込み経路を残す限り、`SECURE_BOOT_EN` なしでも SDM + 暗号化で「読み出し不可・
+  任意ファームの書き込み不可」までは達成できる（署名検証はされない）
+
 ### 実機で確認できたこと
 
 - `GetInfo`（CTAP 2.3 / max 1024）、登録（packed / UP+AT）、認証（署名 71B / counter）、**再起動後の永続化**、LCD 表示

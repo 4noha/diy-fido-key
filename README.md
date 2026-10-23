@@ -287,6 +287,7 @@ FIDO_USB_VID=0x1209 FIDO_USB_PID=0x0001 sh tools/build-pico-fido-esp32s3.sh
 - Flash Encryption を有効にすると **Secure Download Mode (SDM)** になる。SDM では `read-flash` / `chip-id` / eFuse 読み出しが不可で、**署名済みブートローダが必要**。書き込みは `--force` と事前暗号化イメージで行う
 - pico-fido は `part0` を **mmap** するが、暗号化有効時は mmap が復号するため平文 FS と一致しない。`patches/pico-fido-psram-shadow.patch` で **PSRAM 上のシャドウ**に置き換え、`esp_flash_read/write`（平文）で読み書きする。`part0` は暗号化フラグを付けない
 - PSRAM は **40MHz**、`CONFIG_SPIRAM_IGNORE_NOTFOUND=y`（未搭載でも起動）
+- 署名付きブートローダは 32KB を超えるため、Secure Boot を含むプロファイルは **パーティションテーブルを 0x10000** に移動する（マージ済みイメージが配置を含む）。`encrypted-release` は 0x9000
 
 ### 鍵
 
